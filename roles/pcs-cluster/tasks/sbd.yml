@@ -1,0 +1,55 @@
+---
+- name: Enable softdog kernel module
+  lineinfile:
+    path: /etc/modules-load.d/watchdog.conf
+    line: softdog
+    create: yes
+    mode: '0644'
+
+- name: Restart systemd-modules-load service
+  systemd:
+    name: systemd-modules-load
+    state: restarted
+
+- name: Create SBD device
+  command: sbd -d {{ sbd_device }} create
+  register: sbd_create
+  changed_when: sbd_create.rc == 0
+  failed_when: sbd_create.rc != 0 and 'already exists' not in sbd_create.stderr
+
+- name: Configure SBD device
+  template:
+    src: sbd.sysconfig.j2
+    dest: /etc/sysconfig/sbd
+    mode: '0644'
+
+- name: Enable SBD service
+  systemd:
+    name: sbd
+    enabled: yes
+
+- name: Restart Pacemaker service
+  systemd:
+    name: pacemaker
+    state: restarted
+
+- name: Verify SBD service status
+  systemd:
+    name: sbd
+    state: started
+  register: sbd_status
+  retries: 5
+  delay: 3
+  until: sbd_status.status.ActiveState == 'active'
+
+- name: Create SBD fence resource
+  command: pcs stonith create {{ sbd_stonith_name }} fence_sbd devices="{{ sbd_device }}" pcmk_host_list="{{ pacemaker_nodes | join(' ') }}"
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: stonith_create
+  failed_when: stonith_create.rc != 0 and 'already exists' not in stonith_create.stderr
+
+- name: Set stonith timeout
+  command: pcs property set stonith-timeout={{ stonith_timeout }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"

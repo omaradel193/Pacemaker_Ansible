@@ -1,0 +1,10 @@
+---
+# tasks file for roles/pcs-cluster
+- name: Disable SELinux and firewall
+  include_tasks: cluster.yml
+
+- name: Configure SBD
+  include_tasks: sbd.yml
+
+- name: Configure LVM and Apache resources
+  include_tasks: resources.yml

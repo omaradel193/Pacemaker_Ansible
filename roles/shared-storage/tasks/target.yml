@@ -1,0 +1,79 @@
+---
+- name: Install targetcli
+  dnf:
+    name: targetcli
+    state: present
+
+- name: Create directory for iSCSI disk images
+  file:
+    path: "{{ iscsi_target_disk_directory }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create disk images for iSCSI
+  command: targetcli /backstores/fileio create {{ item.name }} {{ iscsi_target_disk_directory }}/{{ item.name }}.img {{ item.size }}
+  args:
+    creates: "{{ iscsi_target_disk_directory }}/{{ item.name }}.img"
+  register: disk_create
+  changed_when: disk_create.rc == 0
+  failed_when: disk_create.rc != 0
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Create iSCSI targets
+  command: targetcli /iscsi create {{ item.target_iqn }}
+  register: target_create
+  changed_when: target_create.rc == 0
+  failed_when: target_create.rc != 0 and 'already exists' not in target_create.stderr
+  loop: "{{ iscsi_target_disks }}"
+  retries: 3
+  delay: 2
+  until: target_create.rc == 0 or 'already exists' in target_create.stderr
+
+- name: Enable authentication for targets
+  command: targetcli /iscsi/{{ item.target_iqn }}/tpg1 set attribute authentication=1
+  register: auth_set
+  changed_when: auth_set.rc == 0
+  failed_when: auth_set.rc != 0
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Create LUNs for disks
+  command: targetcli /iscsi/{{ item.target_iqn }}/tpg1/luns create /backstores/fileio/{{ item.name }}
+  register: lun_create
+  changed_when: lun_create.rc == 0
+  failed_when: lun_create.rc != 0 and 'already exists' not in lun_create.stderr
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Create ACLs for initiator
+  command: targetcli /iscsi/{{ item.target_iqn }}/tpg1/acls create {{ iscsi_target_initiator_iqn }}
+  register: acl_create
+  changed_when: acl_create.rc == 0
+  failed_when: acl_create.rc != 0 and 'already exists' not in acl_create.stderr
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Set authentication userid for initiator
+  command: targetcli /iscsi/{{ item.target_iqn }}/tpg1/acls/{{ iscsi_target_initiator_iqn }} set auth userid={{ iscsi_target_auth_userid }}
+  register: userid_set
+  changed_when: userid_set.rc == 0
+  failed_when: userid_set.rc != 0
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Set authentication password for initiator
+  command: targetcli /iscsi/{{ item.target_iqn }}/tpg1/acls/{{ iscsi_target_initiator_iqn }} set auth password={{ iscsi_target_auth_password }}
+  register: password_set
+  changed_when: password_set.rc == 0
+  failed_when: password_set.rc != 0
+  loop: "{{ iscsi_target_disks }}"
+
+- name: Save targetcli configuration
+  command: targetcli saveconfig
+  register: save_config
+  changed_when: save_config.rc == 0
+  failed_when: save_config.rc != 0
+
+- name: Ensure target service is enabled and started
+  systemd:
+    name: target
+    enabled: yes
+    state: started

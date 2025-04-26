@@ -1,0 +1,25 @@
+---
+# defaults file for roles/shared-storage
+# iSCSI Target Defaults
+iscsi_target_disk_directory: /var/lib/iscsi_disks
+iscsi_target_disks:
+  - name: disk01
+    size: 1G
+    target_iqn: iqn.2022-01.world.srv:dlp.target01
+  - name: disk02
+    size: 1G
+    target_iqn: iqn.2022-01.world.srv:dlp.target02
+iscsi_target_initiator_iqn: iqn.2022-01.world.srv:node01.initiator01
+iscsi_target_auth_userid: username
+iscsi_target_auth_password: password
+
+# iSCSI Initiator Defaults
+iscsi_initiator_target_ip: 192.168.11.128
+iscsi_initiator_targets:
+  - iqn: iqn.2022-01.world.srv:dlp.target01
+  - iqn: iqn.2022-01.world.srv:dlp.target02
+iscsi_initiator_iqn: iqn.2022-01.world.srv:node01.initiator01
+iscsi_initiator_auth_userid: username
+iscsi_initiator_auth_password: password
+iscsi_initiator_disk_device1: /dev/sdb
+iscsi_initiator_disk_device2: /dev/sdc

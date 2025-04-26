@@ -1,0 +1,9 @@
+---
+# tasks file for roles/shared-storage
+- name: Configure iSCSI Target
+  include_tasks: target.yml
+  when: "'iscsi_server' in group_names"
+
+- name: Configure iSCSI Initiator
+  include_tasks: initiator.yml
+  when: "'iscsi_initiator' in group_names"

@@ -1,0 +1,144 @@
+---
+- name: Ensure global section exists in lvm.conf
+  lineinfile:
+    path: /etc/lvm/lvm.conf
+    regexp: '^global {'
+    line: 'global {'
+    state: present
+  notify: Restart lvm2
+
+- name: Configure LVM system_id_source
+  lineinfile:
+    path: /etc/lvm/lvm.conf
+    regexp: '^(\s*)system_id_source\s*='
+    line: '    system_id_source = "uname"'
+    insertafter: '^global {'
+    state: present
+  notify: Restart lvm2
+
+- name: Debug LVM configuration before changes
+  command: cat /etc/lvm/lvm.conf
+  register: lvm_conf_before
+  changed_when: false
+  failed_when: false
+
+- name: Log LVM configuration before
+  debug:
+    msg: "LVM config before: {{ lvm_conf_before.stdout }}"
+  when: lvm_conf_before.rc == 0
+
+- name: Verify LVM system ID
+  command: lvm systemid
+  register: lvm_systemid
+  changed_when: false
+  failed_when: lvm_systemid.rc != 0 or ansible_hostname not in lvm_systemid.stdout_lines[-1]
+  retries: 3
+  delay: 5
+  until: lvm_systemid.rc == 0 and ansible_hostname in lvm_systemid.stdout_lines[-1]
+
+- name: Debug LVM system ID
+  debug:
+    msg: "LVM system ID: {{ lvm_systemid.stdout }}"
+  when: lvm_systemid.rc == 0
+
+- name: Create volume group
+  command: vgcreate --setautoactivation n {{ lvm_vg_name }} {{ lvm_device }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: vg_create
+  failed_when: vg_create.rc != 0 and 'already exists' not in vg_create.stderr
+
+- name: Create logical volume (with force to wipe signatures)
+  command: >
+    lvcreate -L{{ lvm_lv_size }} -n {{ lvm_lv_name }} {{ lvm_vg_name }}
+     -y 
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: lv_create
+  ignore_errors: yes
+  failed_when: >
+    (lv_create.rc is defined and lv_create.rc != 0) and
+    ('already exists' not in (lv_create.stderr | default(''))) and
+    ('Volume group "' not in (lv_create.stderr | default('')))
+
+- name: Format logical volume with XFS
+  filesystem:
+    fstype: xfs
+    dev: /dev/{{ lvm_vg_name }}/{{ lvm_lv_name }}
+    force: yes  # This will automatically answer yes to any warnings
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  
+
+
+- name: Install httpd
+  dnf:
+    name: httpd
+    state: present
+
+- name: Create web root directory
+  file:
+    path: /var/www/html
+    state: directory
+    mode: '0755'
+
+- name: Create index.html
+  template:
+    src: index.html.j2
+    dest: /var/www/html/index.html
+    mode: '0644'
+
+- name: Configure Apache server-status
+  template:
+    src: status.conf.j2
+    dest: /etc/httpd/conf.d/status.conf
+    mode: '0644'
+
+- name: Create LVM resource
+  command: pcs resource create apache_LVM LVM-activate vgname={{ lvm_vg_name }} vg_access_mode=system_id --group {{ apache_group }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: lvm_resource
+  failed_when: lvm_resource.rc != 0 and 'already exists' not in lvm_resource.stderr
+
+- name: Create Filesystem resource
+  command: pcs resource create apache_FS Filesystem device="/dev/{{ lvm_vg_name }}/{{ lvm_lv_name }}" directory="/var/www" fstype=xfs --group {{ apache_group }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: fs_resource
+  failed_when: fs_resource.rc != 0 and 'already exists' not in fs_resource.stderr
+
+- name: Create VIP resource
+  command: pcs resource create apache_VIP IPaddr2 ip={{ apache_vip }} cidr_netmask={{ apache_cidr_netmask }} --group {{ apache_group }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: vip_resource
+  failed_when: vip_resource.rc != 0 and 'already exists' not in vip_resource.stderr
+
+- name: Create Apache resource
+  command: >
+    pcs resource create apache_webSRV apache
+    configfile="/etc/httpd/conf/httpd.conf"
+    statusurl="http://127.0.0.1/server-status"
+    op start timeout={{ apache_timeout | default(120) }}
+    --group {{ apache_group }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: apache_resource
+  failed_when: >
+    apache_resource.rc != 0 and
+    'already exists' not in apache_resource.stderr
+
+- name: Debug resource status
+  command: pcs status
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: pcs_status
+  changed_when: false
+  failed_when: false
+
+- name: Log resource status
+  debug:
+    msg: "PCS status: {{ pcs_status.stdout }}"
+  run_once: true
+  when: pcs_status.rc == 0

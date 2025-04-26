@@ -1,0 +1,76 @@
+---
+- name: Install iscsi-initiator-utils
+  dnf:
+    name: iscsi-initiator-utils
+    state: present
+
+- name: Set initiator IQN
+  copy:
+    content: "InitiatorName={{ iscsi_initiator_iqn }}\n"
+    dest: /etc/iscsi/initiatorname.iscsi
+    mode: '0644'
+
+- name: Configure CHAP authentication
+  lineinfile:
+    path: /etc/iscsi/iscsid.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?node.session.auth.authmethod', line: 'node.session.auth.authmethod = CHAP' }
+    - { regexp: '^#?node.session.auth.username', line: 'node.session.auth.username = {{ iscsi_initiator_auth_userid }}' }
+    - { regexp: '^#?node.session.auth.password', line: 'node.session.auth.password = {{ iscsi_initiator_auth_password }}' }
+
+- name: Discover iSCSI targets
+  command: iscsiadm -m discovery -t sendtargets -p {{ iscsi_initiator_target_ip }}
+  register: discovery
+  changed_when: discovery.rc == 0
+  failed_when: discovery.rc != 0
+
+- name: Set node startup to automatic
+  command: iscsiadm -m node -T {{ item.iqn }} -p {{ iscsi_initiator_target_ip }} --op update -n node.startup -v automatic
+  changed_when: true
+  loop: "{{ iscsi_initiator_targets }}"
+
+- name: Log in to iSCSI targets
+  command: iscsiadm -m node -T {{ item.iqn }} -p {{ iscsi_initiator_target_ip }} --login
+  register: login
+  changed_when: login.rc == 0
+  failed_when: login.rc != 0 and 'already present' not in login.stderr
+  loop: "{{ iscsi_initiator_targets }}"
+
+- name: Verify iSCSI sessions
+  command: iscsiadm -m session -o show
+  register: session_check
+  changed_when: false
+  failed_when: "'iqn.2022-01.world.srv:dlp.target01' not in session_check.stdout or 'iqn.2022-01.world.srv:dlp.target02' not in session_check.stdout"
+
+- name: Wait for disks to appear
+  wait_for:
+    path: "{{ item }}"
+    state: present
+    timeout: 30
+  register: disk_wait
+  failed_when: disk_wait.elapsed >= 30
+  loop:
+    - "{{ iscsi_initiator_disk_device1 }}"
+    - "{{ iscsi_initiator_disk_device2 }}"
+
+- name: Create GPT label on disks
+  command: parted --script {{ item }} mklabel gpt
+  register: parted_label
+  changed_when: parted_label.rc == 0
+  failed_when: parted_label.rc != 0
+  loop:
+    - "{{ iscsi_initiator_disk_device1 }}"
+    - "{{ iscsi_initiator_disk_device2 }}"
+
+- name: Create primary partition on disks
+  command: parted --script {{ item }} mkpart primary 0% 100%
+  register: parted_partition
+  changed_when: parted_partition.rc == 0
+  failed_when: parted_partition.rc != 0
+  loop:
+    - "{{ iscsi_initiator_disk_device1 }}"
+    - "{{ iscsi_initiator_disk_device2 }}"
+

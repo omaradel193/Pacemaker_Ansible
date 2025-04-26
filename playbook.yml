@@ -1,0 +1,13 @@
+---
+- name: Configure iSCSI Target and Initiator
+  hosts: all
+  become: yes
+  roles:
+    - /home/ansible/pacemaker/roles/shared-storage
+
+
+- name: Configure iSCSI Target and Initiator
+  hosts: iscsi_initiator
+  become: yes
+  roles:
+    - /home/ansible/pacemaker/roles/pcs-cluster

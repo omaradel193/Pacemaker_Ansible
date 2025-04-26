@@ -1,0 +1,6 @@
+---
+# handlers file for roles/pcs-cluster
+- name: Restart lvm2
+  systemd:
+    name: lvm2-lvmetad
+    state: restarted

@@ -1,0 +1,87 @@
+---
+- name: Disable SELinux temporarily
+  command: setenforce 0
+  changed_when: true
+  ignore_errors: true
+
+- name: Disable SELinux permanently
+  lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: SELINUX=disabled
+    state: present
+
+- name: Stop and disable firewalld
+  systemd:
+    name: firewalld
+    state: stopped
+    enabled: no
+
+- name: Enable highavailability repository
+  command: dnf config-manager --set-enabled highavailability
+  changed_when: true
+
+- name: Install pcs and fence-agents-all
+  dnf:
+    name:
+      - pcs
+      - fence-agents-all
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Enable and start pcsd service
+  systemd:
+    name: pcsd
+    enabled: yes
+    state: started
+
+- name: Set password for hacluster user
+  user:
+    name: hacluster
+    password: "{{ hacluster_password | password_hash('sha512') }}"
+    update_password: always
+
+- name: Check if cluster exists on each node
+  command: pcs status
+  register: pcs_status
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Destroy existing cluster if force_cluster_destroy is true
+  command: pcs cluster destroy
+  when: force_cluster_destroy and pcs_status.rc != 0
+  register: cluster_destroy
+  changed_when: cluster_destroy.rc == 0
+
+- name: Stop corosync and pacemaker services if cluster exists
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - corosync
+    - pacemaker
+  when: force_cluster_destroy and pcs_status.rc != 0
+
+- name: Authenticate Pacemaker nodes
+  command: pcs host auth {{ pacemaker_nodes | join(' ') }} -u hacluster -p {{ hacluster_password }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: pcs_auth
+  failed_when: pcs_auth.rc != 0 and 'already authenticated' not in pcs_auth.stderr
+
+- name: Set up Pacemaker cluster
+  command: pcs cluster setup {{ pacemaker_cluster_name }} --start {{ pacemaker_nodes | join(' ') }}
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"
+  register: cluster_setup
+  failed_when: >
+    cluster_setup.rc != 0 and
+    'already exists' not in cluster_setup.stderr and
+    'Some nodes are already in a cluster' not in cluster_setup.stderr
+
+- name: Enable cluster to start on boot
+  command: pcs cluster enable --all
+  run_once: true
+  delegate_to: "{{ pacemaker_nodes[0] }}"

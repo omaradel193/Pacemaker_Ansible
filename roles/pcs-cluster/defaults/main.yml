@@ -1,0 +1,26 @@
+---
+# defaults file for roles/pcs-cluster
+pacemaker_cluster_name: mycluster
+pacemaker_nodes:
+  - node1
+  - node2
+  - node3
+  
+hacluster_password: "123"
+stonith_timeout: 12s
+
+# SBD Defaults
+sbd_device: /dev/disk/by-id/scsi-SLIO-ORG_disk01_7ab61063-067f-4aae-993a-300dc90b8164-part1
+sbd_stonith_name: MY_SBD_FENCE
+force_cluster_destroy: true  # Set to true to automatically destroy existing clusters
+
+# LVM and Apache Defaults
+lvm_vg_name: my_vg
+lvm_lv_name: my_lv
+lvm_lv_size: 200
+lvm_device: /dev/sdc1
+apache_vip: 192.168.11.200
+apache_cidr_netmask: 24
+apache_timeout: 40  # Default timeout in seconds
+apache_group: apachegroup
+
