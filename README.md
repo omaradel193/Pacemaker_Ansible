@@ -2,6 +2,9 @@
 
 This repository provides an Ansible playbook to automate the configuration of a Pacemaker high-availability (HA) cluster on Red Hat Enterprise Linux (RHEL) or compatible systems (e.g., CentOS, AlmaLinux, Rocky Linux). The playbook sets up a 3-node cluster with shared storage using iSCSI, Logical Volume Manager (LVM), and an Apache web server managed by Pacemaker resources. The cluster ensures high availability for an Apache service with a virtual IP, a shared XFS filesystem, and LVM-managed storage, using Storage-Based Death (SBD) on `/dev/sdb1` for fencing.
 
+![image](https://github.com/user-attachments/assets/c6faf52f-9963-426c-a44a-f230f0b72397)
+
+
 ## Features
 - Configures a 3-node Pacemaker cluster (`node1`, `node2`, `node3`) with Corosync for cluster communication.
 - Sets up shared storage using an iSCSI device (`/dev/sdc1`).
